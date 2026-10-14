@@ -59,6 +59,7 @@ dsh plugin --profile desktop add github:cyberbutterfly0/dsh-pip-window
 
 - **浏览器要求**：`documentPictureInPicture` 需要 Chrome / Edge **116+**、Firefox **151+**。**Safari 至今不支持**，各移动端浏览器也不支持。
 - **需要安全上下文**：`https://`、`http://localhost` 或 `http://127.0.0.1` 才行。用局域网 IP（`http://192.168.x.x:3080`）打开时，浏览器根本不会暴露这个 API。
+- **小窗标题栏的地址改不掉**：标题栏显示的是源站（如 `127.0.0.1:3080`），这是[文档级 PiP 规范](https://wicg.github.io/document-picture-in-picture/#origin-visibility)的**安全要求**——UA 必须在标题栏持续标明控制该窗口的源，防止置顶窗口冒充其它界面。页面设的文档标题不会影响它，位置与大小同理也由浏览器掌控。会话身份请看窗口内部的标题行。
 - **只对 Web 客户端生效**（`dsh.client.platform: "web"`）。
 - **桌面端未实测**：只在 Web 端验证过。官方桌面端是 Electron 壳、且用独立的 `desktop` profile，安装方式见上面的「桌面端」一节，但那条路还没人跑通过。
 - **契约锚定 dsh `0.1.7-alpha.2`**：实现里用到了 `data-sidebar-collapsed` 属性、`--dsw-*` 变量、`localStorage` 的 `dsh.sessions.current` 这些内部细节，dsh 升级后可能需要跟改（最可能先坏的是窄栏对齐、主题搬运、会话跟随）。
