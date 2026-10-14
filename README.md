@@ -4,6 +4,8 @@
 
 点侧边栏底部的「小窗」，当前会话就会在一个 [Document Picture-in-Picture](https://developer.mozilla.org/docs/Web/API/Document_Picture-in-Picture_API) 窗口里打开 —— 系统级浮窗，切到别的应用也一直在最上层，可以一边看 agent 干活一边做别的事，不用一直占着一个浏览器标签页。
 
+![小窗截图](docs/pip-window.png)
+
 ## 特性
 
 | 能力 | 说明 |
