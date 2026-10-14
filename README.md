@@ -34,7 +34,7 @@ dsh plugin --profile web add link:/absolute/path/to/dsh-pip-window
 
 装完**刷新页面**，侧边栏底部就会出现「小窗」。
 
-### 桌面端
+### 桌面端（没有实测过）
 
 官方桌面端使用独立的 profile，需要单独装一次：
 
@@ -44,6 +44,8 @@ dsh plugin --profile desktop add github:cyberbutterfly0/dsh-pip-window
 ```
 
 `desktop` profile 的包管理要用桌面端自带的那份 CLI（应用菜单里的「管理 dsh 命令…」可以注册）。
+
+> **这条路没有实测过。** 本插件只在 Web 端（`dsh web`，Chrome + `http://127.0.0.1:3080`）验证过，作者没有安装官方桌面端。上面这段是按官方 [`apps/desktop` 文档](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/README.zh.md)写的，能不能装通、小窗在 Electron 壳里能不能弹出来，都还没有人试过。想试的话，在桌面端里按 **F12** 打开 DevTools（打包版本也支持），先跑一句 `typeof window.documentPictureInPicture` —— 不是 `"undefined"` 就说明 PiP 这个 API 在壳里可用。试出来了欢迎开 issue 说一声。
 
 ## 用法
 
@@ -57,6 +59,7 @@ dsh plugin --profile desktop add github:cyberbutterfly0/dsh-pip-window
 - **浏览器要求**：`documentPictureInPicture` 需要 Chrome / Edge **116+**、Firefox **151+**。**Safari 至今不支持**，各移动端浏览器也不支持。
 - **需要安全上下文**：`https://`、`http://localhost` 或 `http://127.0.0.1` 才行。用局域网 IP（`http://192.168.x.x:3080`）打开时，浏览器根本不会暴露这个 API。
 - **只对 Web 客户端生效**（`dsh.client.platform: "web"`）。
+- **桌面端未实测**：只在 Web 端验证过。官方桌面端是 Electron 壳、且用独立的 `desktop` profile，安装方式见上面的「桌面端」一节，但那条路还没人跑通过。
 - **契约锚定 dsh `0.1.7-alpha.2`**：实现里用到了 `data-sidebar-collapsed` 属性、`--dsw-*` 变量、`localStorage` 的 `dsh.sessions.current` 这些内部细节，dsh 升级后可能需要跟改（最可能先坏的是窄栏对齐、主题搬运、会话跟随）。
 - **发送与停止没有自动化测试**：一测就会往真实会话里塞消息，目前靠手动验证。
 
