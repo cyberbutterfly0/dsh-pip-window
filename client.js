@@ -222,6 +222,24 @@ window.__ModuleLoader__.load({
 			};
 		}
 
+		/**
+		 * 给 PiP 文档设标题。显式建 <title> 元素，不指望 document.title 的隐式创建 ——
+		 * 在还没有 documentElement 的文档上，那个 setter 会静默什么都不做。
+		 */
+		function applyPipTitle(doc, text) {
+			try {
+				let title = doc.querySelector('title');
+				if (!title) {
+					title = doc.createElement('title');
+					doc.head.appendChild(title);
+				}
+				title.textContent = text;
+				doc.title = text;
+			} catch (err) {
+				warn('set pip title failed', err);
+			}
+		}
+
 		function probeTokens(doc) {
 			const computed = getComputedStyle(doc.body);
 			return {
@@ -947,6 +965,8 @@ window.__ModuleLoader__.load({
 									),
 									fileInput: doc.querySelectorAll('input[type="file"]').length,
 									svgs: doc.querySelectorAll('svg').length,
+									docTitle: doc.title,
+									titleEl: (doc.querySelector('title') || {}).textContent || null,
 									tail: (doc.body.innerText || '').replace(/\s+/g, ' ').slice(-220),
 								}),
 						);
@@ -1228,13 +1248,6 @@ window.__ModuleLoader__.load({
 			return Promise.resolve(requesting).then((win) => {
 				pipWindow = win;
 
-				// 标题栏默认显示主文档 URL（127.0.0.1:3080 之类），换成产品名。
-				try {
-					pipWindow.document.title = 'DeepSeek Harness';
-				} catch {
-					/* 忽略 */
-				}
-
 				const mirrored = mirrorDocument(pipWindow.document);
 				log('document mirrored ' + JSON.stringify(mirrored));
 
@@ -1242,6 +1255,10 @@ window.__ModuleLoader__.load({
 				style.setAttribute('data-plugin', 'dsh-pip-window');
 				style.textContent = PIP_CSS;
 				pipWindow.document.head.appendChild(style);
+
+				// 标题栏默认显示主文档 URL（127.0.0.1:3080 之类），换成产品名。
+				// 放在搬运之后：head 一定就绪了才设得住。
+				applyPipTitle(pipWindow.document, 'DeepSeek Harness');
 
 				const container = pipWindow.document.createElement('div');
 				container.id = 'dsh-pip-root';
