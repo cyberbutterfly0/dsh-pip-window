@@ -1,0 +1,47 @@
+{
+  "name": "dsh-pip-window",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "把 DeepSeek Harness 的会话搬进系统级置顶小窗（Document Picture-in-Picture）",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "picture-in-picture",
+    "pip"
+  ],
+  "homepage": "https://github.com/cyberbutterfly0/dsh-pip-window#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cyberbutterfly0/dsh-pip-window.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cyberbutterfly0/dsh-pip-window/issues"
+  },
+  "author": "cyberbutterfly0",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "engines": {
+    "dsh": ">=0.1.7-alpha.2"
+  }
+}

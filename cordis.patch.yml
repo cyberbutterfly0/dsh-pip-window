@@ -1,0 +1,6 @@
+# dsh-pip-window 的 loader patch 层。
+# profile 把本包列进 dsh.profile.bundles 后，这一层会在所有内置 bundle 层
+# 之后、用户自己的 profile patch 层之前应用，把插件行插进 loader 图。
+- insert:
+    - id: pip-window
+      name: dsh-pip-window
