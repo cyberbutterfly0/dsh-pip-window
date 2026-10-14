@@ -6,6 +6,7 @@
  * M2：接真实会话数据 —— 读当前会话、订阅事件窗（含流式 live chunk）、发送、停止
  * M3：思考/工具改成可比对齐 dsh 的可折叠行，排版（字体族与字重）对标主文档
  * M4：自绘 PiP 风格图标（替换 IconFullscreen）；输入框支持发送图片（选择 + 粘贴）
+ * M5：PiP 窗口标题跟随当前会话（原来是主文档 URL），侧边栏入口对齐「设置」
  *
  * 本文件是零构建的手写 CJS 式 bundle：没有 JSX/TS，React 全部用 createElement。
  * 数据来源是官方客户端服务 ctx.sessions（不是自建 HTTP 端点）：
@@ -806,6 +807,19 @@ window.__ModuleLoader__.load({
 			const running = Boolean(sessionSnap && sessionSnap.running);
 			const title = sessionTitle(listSnap, sessionId) || (sessionId ? sessionId.slice(0, 18) : '未选择会话');
 
+			// PiP 窗口的标题栏默认显示主文档 URL（一串 IP 和端口），
+			// 换成当前会话标题，切会话时跟着变。
+			React.useEffect(() => {
+				const win = pipWindow;
+				if (!win || win.closed) return undefined;
+				try {
+					win.document.title = title + ' · 小窗';
+				} catch {
+					/* 忽略 */
+				}
+				return undefined;
+			}, [title]);
+
 			// 诊断：PiP 是另一个 document，主 tab 的 devtools 看不到它渲染了什么，
 			// 所以把行数/末行摘要打到 console（节流 400ms，避免每个 chunk 一条）。
 			// 默认关闭：localStorage['dsh-pip-window:debug']='1' 打开。
@@ -1130,6 +1144,14 @@ window.__ModuleLoader__.load({
 
 			return Promise.resolve(requesting).then((win) => {
 				pipWindow = win;
+
+				// 挂载前先给个像样的标题，避免那一瞬显示主文档 URL；
+				// 挂载后交给 PipShell 按当前会话标题维护。
+				try {
+					pipWindow.document.title = 'DSH 小窗';
+				} catch {
+					/* 忽略 */
+				}
 
 				const mirrored = mirrorDocument(pipWindow.document);
 				log('document mirrored ' + JSON.stringify(mirrored));
