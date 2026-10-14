@@ -6,7 +6,7 @@
  * M2：接真实会话数据 —— 读当前会话、订阅事件窗（含流式 live chunk）、发送、停止
  * M3：思考/工具改成可比对齐 dsh 的可折叠行，排版（字体族与字重）对标主文档
  * M4：自绘 PiP 风格图标（替换 IconFullscreen）；输入框支持发送图片（选择 + 粘贴）
- * M5：PiP 窗口标题跟随当前会话（原来是主文档 URL），侧边栏入口对齐「设置」
+ * M5：侧边栏入口对齐「设置」；底栏改用官方投影统计（轮/步、tok/s、累计 tok、缓存命中、上下文占用），窗口标题显示产品名
  *
  * 本文件是零构建的手写 CJS 式 bundle：没有 JSX/TS，React 全部用 createElement。
  * 数据来源是官方客户端服务 ctx.sessions（不是自建 HTTP 端点）：
@@ -297,7 +297,9 @@ window.__ModuleLoader__.load({
 			'.dsh-pip-thumb{position:relative;width:46px;height:46px;border-radius:6px;overflow:hidden;border:1px solid rgba(127,127,127,.3);background:rgba(127,127,127,.08)}',
 			'.dsh-pip-thumb img{width:100%;height:100%;object-fit:cover;display:block}',
 			'.dsh-pip-thumb-x{position:absolute;top:1px;right:1px;display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border:0;border-radius:50%;padding:0;cursor:pointer;line-height:1;background:rgba(0,0,0,.55);color:#fff}',
-			'.dsh-pip-status{flex:0 0 auto;display:flex;align-items:center;gap:6px;font-size:11px;opacity:.65}',
+			'.dsh-pip-status{flex:0 0 auto;display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;opacity:.65}',
+			'.dsh-pip-status>span{white-space:nowrap}',
+			'.dsh-pip-status>.dsh-pip-hint{overflow:hidden;text-overflow:ellipsis;min-width:0}',
 			'.dsh-pip-dot{width:6px;height:6px;border-radius:50%;background:rgba(127,127,127,.6);display:inline-block}',
 			'.dsh-pip-dot[data-state="running"]{background:#3fb950}',
 			'.dsh-pip-dot[data-state="opening"]{background:#d29922}',
@@ -403,6 +405,46 @@ window.__ModuleLoader__.load({
 			const row = list.byId && list.byId[sessionId];
 			if (!row) return '';
 			return row.displayTitle || row.title || '';
+		}
+
+		/** 紧凑 token 数：1234 → 1.2K，18900000 → 18.9M（对齐主界面 formatTokens）。 */
+		function formatTokens(value) {
+			const scaled = (candidate) =>
+				candidate >= 100 ? String(Math.round(candidate)) : String(Math.round(candidate * 10) / 10);
+			if (value < 1e3) return String(value);
+			if (value < 1e6) return scaled(value / 1e3) + 'K';
+			return scaled(value / 1e6) + 'M';
+		}
+
+		/** 输出速度：>=10 取整，否则保留一位小数（对齐主界面 formatTokensPerSecond）。 */
+		function formatTps(value) {
+			const clamped = Math.max(0, value);
+			return clamped >= 10 ? String(Math.round(clamped)) : String(Math.round(clamped * 10) / 10);
+		}
+
+		/** 计费输入 = 未缓存输入 + 缓存读 + 缓存写（三段互斥，来自 tokenUsage 投影）。 */
+		function billedInputTokens(usage) {
+			return (usage.uncachedInputTokens || 0) + (usage.cacheReadTokens || 0) + (usage.cacheWriteTokens || 0);
+		}
+
+		/** 缓存命中率（百分比文本）；没有计费输入时返回 null。 */
+		function cacheHitPercent(usage) {
+			const denominator = billedInputTokens(usage);
+			if (!denominator) return null;
+			const read = usage.cacheReadTokens || 0;
+			if (read >= denominator) return '100';
+			const percent = (read / denominator) * 100;
+			const rounded = Math.round(percent);
+			// 四舍五入到 100 但实际没到 100 时给一位小数，免得显示成假的 100%
+			return String(rounded < 100 ? rounded : Math.round(percent * 10) / 10);
+		}
+
+		/** 上下文占用；分子优先用 projectedTokens（含本回合 surface 增量），缺了退回 pressureTokens。 */
+		function contextOccupancy(pressure) {
+			if (!pressure) return null;
+			const used = pressure.projectedTokens != null ? pressure.projectedTokens : pressure.pressureTokens;
+			if (used == null || pressure.contextWindow == null) return null;
+			return { percent: Math.min(100, Math.round((used / pressure.contextWindow) * 100)), used };
 		}
 
 		/**
@@ -675,6 +717,11 @@ window.__ModuleLoader__.load({
 			const [draft, setDraft] = React.useState('');
 			const [images, setImages] = React.useState([]);
 			const [busy, setBusy] = React.useState(false);
+			// 官方投影（durable 全量日志折叠出来的累计值，不是本地按当前窗口算的）：
+			// sessionStats = 轮/步与各项用时，tokenUsage = token 计费桶，contextPressure = 上下文占用。
+			const [statsSnap, setStatsSnap] = React.useState(null);
+			const [usageSnap, setUsageSnap] = React.useState(null);
+			const [pressureSnap, setPressureSnap] = React.useState(null);
 
 			const bindingRef = React.useRef(null);
 			const bodyRef = React.useRef(null);
@@ -723,6 +770,9 @@ window.__ModuleLoader__.load({
 				let unsubEvents = null;
 				let unsubSession = null;
 				let unsubList = null;
+				let unsubStats = null;
+				let unsubUsage = null;
+				let unsubPressure = null;
 
 				const attachBinding = (binding) => {
 					bindingRef.current = binding;
@@ -746,6 +796,28 @@ window.__ModuleLoader__.load({
 						unsubList = sessions.list.subscribe(publishList);
 					}
 
+					// 底栏统计读官方投影，而不是本地折叠事件窗口 ——
+					// 小窗的事件窗口是分页的（会显示「更早的历史未加载」），
+					// 本地算只能得出「屏幕上这一段」，投影才是整份日志的累计值。
+					const faces = binding.session && binding.session.projections;
+					if (faces && typeof faces.faceOf === 'function') {
+						const bindFace = (key, setter) => {
+							try {
+								const face = faces.faceOf(key);
+								if (!face || typeof face.subscribe !== 'function') return null;
+								const publish = () => setter(face.getSnapshot());
+								publish();
+								return face.subscribe(publish);
+							} catch (err) {
+								warn('projection unavailable: ' + key, err);
+								return null;
+							}
+						};
+						unsubStats = bindFace('sessionStats', setStatsSnap);
+						unsubUsage = bindFace('tokenUsage', setUsageSnap);
+						unsubPressure = bindFace('contextPressure', setPressureSnap);
+					}
+
 					setPhase('ready');
 					const window0 = source.getSnapshot();
 					dlog(
@@ -755,6 +827,7 @@ window.__ModuleLoader__.load({
 								revision: window0 && window0.revision,
 								entries: window0 && window0.entries ? window0.entries.length : 0,
 								hasMore: window0 && window0.hasMore,
+								faces: Boolean(binding.session && binding.session.projections),
 							}),
 					);
 				};
@@ -783,6 +856,9 @@ window.__ModuleLoader__.load({
 					if (unsubEvents) unsubEvents();
 					if (unsubSession) unsubSession();
 					if (unsubList) unsubList();
+					if (unsubStats) unsubStats();
+					if (unsubUsage) unsubUsage();
+					if (unsubPressure) unsubPressure();
 					bindingRef.current = null;
 					try {
 						if (reference && typeof reference.release === 'function') reference.release();
@@ -807,18 +883,18 @@ window.__ModuleLoader__.load({
 			const running = Boolean(sessionSnap && sessionSnap.running);
 			const title = sessionTitle(listSnap, sessionId) || (sessionId ? sessionId.slice(0, 18) : '未选择会话');
 
-			// PiP 窗口的标题栏默认显示主文档 URL（一串 IP 和端口），
-			// 换成当前会话标题，切会话时跟着变。
-			React.useEffect(() => {
-				const win = pipWindow;
-				if (!win || win.closed) return undefined;
-				try {
-					win.document.title = title + ' · 小窗';
-				} catch {
-					/* 忽略 */
-				}
-				return undefined;
-			}, [title]);
+			// 底栏统计：全部来自官方投影，和主界面底栏同源。
+			const stats = statsSnap || null;
+			const usage = usageSnap || null;
+			const occupancy = contextOccupancy(pressureSnap);
+			const tps = stats && stats.decodeMs > 0 ? formatTps(stats.decodeTokens / (stats.decodeMs / 1000)) : null;
+			const hasTokens = Boolean(usage && (billedInputTokens(usage) > 0 || (usage.outputTokens || 0) > 0));
+			const totalTokens = usage
+				? usage.totalTokens != null
+					? usage.totalTokens
+					: billedInputTokens(usage) + (usage.outputTokens || 0)
+				: null;
+			const cacheHit = hasTokens ? cacheHitPercent(usage) : null;
 
 			// 诊断：PiP 是另一个 document，主 tab 的 devtools 看不到它渲染了什么，
 			// 所以把行数/末行摘要打到 console（节流 400ms，避免每个 chunk 一条）。
@@ -1112,10 +1188,17 @@ window.__ModuleLoader__.load({
 						'div',
 						{ className: 'dsh-pip-status' },
 						h('span', { className: 'dsh-pip-dot', 'data-state': running ? 'running' : phase }),
-						h('span', null, rows.length + ' 行'),
-						eventWindow && eventWindow.hasMore ? h('span', null, '· 更早的历史未加载') : null,
+						stats && stats.steps > 0
+							? h('span', null, stats.turns + ' 轮 ' + stats.steps + ' 步')
+							: h('span', null, rows.length + ' 行'),
+						eventWindow && eventWindow.hasMore
+							? h('span', { className: 'dsh-pip-hint' }, '· 更早的历史未加载')
+							: null,
 						h('span', { style: { flex: '1 1 auto' } }),
-						eventWindow ? h('span', null, 'rev ' + eventWindow.revision) : null,
+						tps ? h('span', null, tps + ' tok/s') : null,
+						totalTokens != null ? h('span', null, formatTokens(totalTokens) + ' tok') : null,
+						cacheHit !== null ? h('span', null, '缓存命中 ' + cacheHit + '%') : null,
+						occupancy ? h('span', null, '上下文 ' + occupancy.percent + '%') : null,
 					),
 				),
 			);
@@ -1145,10 +1228,9 @@ window.__ModuleLoader__.load({
 			return Promise.resolve(requesting).then((win) => {
 				pipWindow = win;
 
-				// 挂载前先给个像样的标题，避免那一瞬显示主文档 URL；
-				// 挂载后交给 PipShell 按当前会话标题维护。
+				// 标题栏默认显示主文档 URL（127.0.0.1:3080 之类），换成产品名。
 				try {
-					pipWindow.document.title = 'DSH 小窗';
+					pipWindow.document.title = 'DeepSeek Harness';
 				} catch {
 					/* 忽略 */
 				}
