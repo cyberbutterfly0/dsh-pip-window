@@ -301,10 +301,10 @@ window.__ModuleLoader__.load({
 			 * 自绘滚动条。起因：PiP 窗口里 UA 滚动条（::-webkit-scrollbar 和 scrollbar-color 两条路都试过）
 			 * 画得出、拖不动——拖动交互在 UA 层就失效了。所以藏掉 UA 滚动条，自己用 pointer 事件驱动。
 			 */
-			'.dsh-pip-scrollbar{flex:0 0 12px;width:12px;position:relative;background:rgba(127,127,127,.08);border-radius:6px;margin:4px 0}',
-			'.dsh-pip-scrollbar-thumb{position:absolute;left:2px;right:2px;border-radius:4px;background:rgba(176,176,176,.62);cursor:grab;touch-action:none}',
-			'.dsh-pip-scrollbar-thumb:hover{background:rgba(196,196,196,.82)}',
-			'.dsh-pip-scrollbar-thumb:active{cursor:grabbing;background:rgba(214,214,214,.95)}',
+			'.dsh-pip-scrollbar{flex:0 0 8px;width:8px;position:relative;background:transparent;border-radius:4px;margin:2px 0}',
+			'.dsh-pip-scrollbar-thumb{position:absolute;left:1px;right:1px;border-radius:3px;background:rgba(176,176,176,.42);cursor:pointer;touch-action:none;transition:background .15s ease}',
+			'.dsh-pip-scrollbar-thumb:hover{background:rgba(196,196,196,.7)}',
+			'.dsh-pip-scrollbar-thumb:active{background:rgba(214,214,214,.85)}',
 			'.dsh-pip-placeholder{margin:auto;text-align:center;font-size:12px;opacity:.6;line-height:1.9}',
 			'.dsh-pip-row{display:flex;flex-direction:column;gap:2px}',
 			'.dsh-pip-role{font-size:10px;letter-spacing:.06em;text-transform:uppercase;opacity:.5}',
@@ -954,7 +954,7 @@ window.__ModuleLoader__.load({
 			const trackHeight = scrollInfo.view;
 			const thumbHeight =
 				scrollInfo.total > 0 && trackHeight > 0
-					? Math.max(28, Math.round((trackHeight / scrollInfo.total) * trackHeight))
+					? Math.max(24, Math.round((trackHeight / scrollInfo.total) * trackHeight))
 					: 0;
 			const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
 			const scrollRange = Math.max(0, scrollInfo.total - scrollInfo.view);
