@@ -32,6 +32,8 @@ window.__ModuleLoader__.load({
 		const IconTool = primitives.IconApiOutlineRegular;
 		const IconPaperclip = primitives.IconPaperclipOutlineRegular;
 		const IconClose = primitives.IconCloseOutlineRegular;
+		const IconChevronUp = primitives.IconChevronUpOutlineRegular;
+		const IconChevronDown = primitives.IconChevronDownOutlineRegular;
 
 		/**
 		 * 自绘的「置顶小窗」图标：外框只保留左/下/右三段（右上留口），
@@ -292,7 +294,17 @@ window.__ModuleLoader__.load({
 			'.dsh-pip-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;border:0;background:transparent;color:inherit;cursor:pointer;border-radius:6px;padding:4px;font:inherit;opacity:.75}',
 			'.dsh-pip-btn:hover{background:rgba(127,127,127,.16);opacity:1}',
 			'.dsh-pip-btn[disabled]{opacity:.35;cursor:default}',
-			'.dsh-pip-body{flex:1 1 auto;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:8px}',
+			'.dsh-pip-main{flex:1 1 auto;display:flex;min-height:0;position:relative}',
+			'.dsh-pip-body{flex:1 1 auto;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:8px;scrollbar-width:none}',
+			'.dsh-pip-body::-webkit-scrollbar{display:none}',
+			/*
+			 * 自绘滚动条。起因：PiP 窗口里 UA 滚动条（::-webkit-scrollbar 和 scrollbar-color 两条路都试过）
+			 * 画得出、拖不动——拖动交互在 UA 层就失效了。所以藏掉 UA 滚动条，自己用 pointer 事件驱动。
+			 */
+			'.dsh-pip-scrollbar{flex:0 0 12px;width:12px;position:relative;background:rgba(127,127,127,.08);border-radius:6px;margin:4px 0}',
+			'.dsh-pip-scrollbar-thumb{position:absolute;left:2px;right:2px;border-radius:4px;background:rgba(176,176,176,.62);cursor:grab;touch-action:none}',
+			'.dsh-pip-scrollbar-thumb:hover{background:rgba(196,196,196,.82)}',
+			'.dsh-pip-scrollbar-thumb:active{cursor:grabbing;background:rgba(214,214,214,.95)}',
 			'.dsh-pip-placeholder{margin:auto;text-align:center;font-size:12px;opacity:.6;line-height:1.9}',
 			'.dsh-pip-row{display:flex;flex-direction:column;gap:2px}',
 			'.dsh-pip-role{font-size:10px;letter-spacing:.06em;text-transform:uppercase;opacity:.5}',
@@ -318,6 +330,8 @@ window.__ModuleLoader__.load({
 			'.dsh-pip-status{flex:0 0 auto;display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;opacity:.65}',
 			'.dsh-pip-status>span{white-space:nowrap}',
 			'.dsh-pip-status>.dsh-pip-hint{overflow:hidden;text-overflow:ellipsis;min-width:0}',
+			'.dsh-pip-nav{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:inherit;cursor:pointer;opacity:.75}',
+			'.dsh-pip-nav:hover{background:rgba(127,127,127,.2);opacity:1}',
 			'.dsh-pip-dot{width:6px;height:6px;border-radius:50%;background:rgba(127,127,127,.6);display:inline-block}',
 			'.dsh-pip-dot[data-state="running"]{background:#3fb950}',
 			'.dsh-pip-dot[data-state="opening"]{background:#d29922}',
@@ -743,8 +757,28 @@ window.__ModuleLoader__.load({
 
 			const bindingRef = React.useRef(null);
 			const bodyRef = React.useRef(null);
+			const trackRef = React.useRef(null);
+			const dragRef = React.useRef(null);
 			const inputRef = React.useRef(null);
 			const fileRef = React.useRef(null);
+
+			// 自绘滚动条：PiP 窗口里 UA 滚动条（::-webkit-scrollbar 或 scrollbar-color 都一样）
+			// 画得出但拖不动，所以把 UA 滚动条藏掉，自己画一条用 pointer 事件驱动的。
+			const [scrollInfo, setScrollInfo] = React.useState({ top: 0, total: 0, view: 0 });
+			const measureScroll = React.useCallback(() => {
+				const el = bodyRef.current;
+				if (!el) return;
+				const next = { top: el.scrollTop, total: el.scrollHeight, view: el.clientHeight };
+				setScrollInfo((prev) =>
+					prev.top === next.top && prev.total === next.total && prev.view === next.view ? prev : next,
+				);
+			}, []);
+			const applyDrag = React.useCallback((clientY) => {
+				const drag = dragRef.current;
+				const el = bodyRef.current;
+				if (!drag || !el) return;
+				el.scrollTop = drag.startTop + ((clientY - drag.startY) * drag.range) / drag.span;
+			}, []);
 
 			// 跟随主视图：localStorage 不会在同 tab 内发变更事件，1s 读一次
 			// （一次 JSON.parse，开销可忽略；比 hud-bar 的 HTTP 轮询轻两个数量级）。
@@ -898,6 +932,123 @@ window.__ModuleLoader__.load({
 				if (body) body.scrollTop = body.scrollHeight;
 			}, [tailKey]);
 
+			// 滚动条度量：滚动、容器尺寸变化、内容变化都要重算
+			React.useEffect(() => {
+				const body = bodyRef.current;
+				if (!body) return undefined;
+				measureScroll();
+				body.addEventListener('scroll', measureScroll, { passive: true });
+				const observer = new ResizeObserver(measureScroll);
+				observer.observe(body);
+				return () => {
+					body.removeEventListener('scroll', measureScroll);
+					observer.disconnect();
+				};
+			}, [measureScroll]);
+
+			React.useLayoutEffect(() => {
+				measureScroll();
+			}, [rows, measureScroll]);
+
+			// 自绘滚动条的几何：滑块高度按月占比，位置按滚动进度
+			const trackHeight = scrollInfo.view;
+			const thumbHeight =
+				scrollInfo.total > 0 && trackHeight > 0
+					? Math.max(28, Math.round((trackHeight / scrollInfo.total) * trackHeight))
+					: 0;
+			const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+			const scrollRange = Math.max(0, scrollInfo.total - scrollInfo.view);
+			const thumbTop = scrollRange > 0 ? Math.round((scrollInfo.top / scrollRange) * maxThumbTop) : 0;
+			// 拖动只用经典 mouse 事件。
+			// PiP 窗口里 pointer 事件不稳定（pointerdown 能到，指针一移出滑块 pointermove 就断了），
+			// 而 mousedown/mousemove/mouseup 在 PiP 里是可靠的；把 move/up 挂到 PiP 自己的 window 上，
+			// 指针移到窗口任何位置都能继续跟手。
+			const endDrag = React.useCallback(() => {
+				const drag = dragRef.current;
+				dragRef.current = null;
+				if (!drag || !drag.view) return;
+				try {
+					drag.view.removeEventListener('mousemove', drag.onMove);
+					drag.view.removeEventListener('mouseup', drag.onUp);
+				} catch {
+					/* 忽略 */
+				}
+			}, []);
+			React.useEffect(() => endDrag, [endDrag]);
+			const onThumbDown = (event) => {
+				const body = bodyRef.current;
+				if (!body) return;
+				const view = event.currentTarget.ownerDocument && event.currentTarget.ownerDocument.defaultView;
+				if (!view) return;
+				event.preventDefault();
+				event.stopPropagation();
+				endDrag();
+				const onMove = (moveEvent) => applyDrag(moveEvent.clientY);
+				const onUp = () => endDrag();
+				dragRef.current = {
+					startY: event.clientY,
+					startTop: body.scrollTop,
+					range: Math.max(1, body.scrollHeight - body.clientHeight),
+					span: Math.max(1, maxThumbTop),
+					view,
+					onMove,
+					onUp,
+				};
+				view.addEventListener('mousemove', onMove);
+				view.addEventListener('mouseup', onUp);
+			};
+			// 点轨道直接跳到对应位置（不依赖滑块拖动，多一条可用路径）
+			const onTrackDown = (event) => {
+				const body = bodyRef.current;
+				const track = trackRef.current;
+				if (!body || !track) return;
+				const rect = track.getBoundingClientRect();
+				if (!rect.height) return;
+				const ratio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+				body.scrollTop = ratio * Math.max(0, body.scrollHeight - body.clientHeight);
+				measureScroll();
+			};
+			const scrollBodyTo = (where) => {
+				const body = bodyRef.current;
+				if (!body) return;
+				body.scrollTop = where === 'top' ? 0 : body.scrollHeight;
+				measureScroll();
+			};
+
+			// 键盘滚动：PiP 窗口里指针「按住拖动」这条路过不去，键盘是另一条稳的路。
+			// 焦点在输入框里时不接管，免得抢掉光标移动。
+			React.useEffect(() => {
+				const el = bodyRef.current;
+				const doc = el && el.ownerDocument;
+				if (!doc) return undefined;
+				const onKeyDown = (event) => {
+					const target = event.target;
+					const tag = target && target.tagName;
+					if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+					const body = bodyRef.current;
+					if (!body) return;
+					const step = Math.max(40, body.clientHeight * 0.9);
+					if (event.key === 'PageDown') {
+						body.scrollTop += step;
+						measureScroll();
+					} else if (event.key === 'PageUp') {
+						body.scrollTop -= step;
+						measureScroll();
+					} else if (event.key === 'Home') {
+						body.scrollTop = 0;
+						measureScroll();
+					} else if (event.key === 'End') {
+						body.scrollTop = body.scrollHeight;
+						measureScroll();
+					} else {
+						return;
+					}
+					event.preventDefault();
+				};
+				doc.addEventListener('keydown', onKeyDown);
+				return () => doc.removeEventListener('keydown', onKeyDown);
+			}, [measureScroll]);
+
 			const running = Boolean(sessionSnap && sessionSnap.running);
 			const title = sessionTitle(listSnap, sessionId) || (sessionId ? sessionId.slice(0, 18) : '未选择会话');
 
@@ -952,6 +1103,7 @@ window.__ModuleLoader__.load({
 					try {
 						const doc = pipWindow && pipWindow.document;
 						if (!doc) return;
+						const bodyEl = doc.querySelector('.dsh-pip-body');
 						log(
 							'pip dom ' +
 								JSON.stringify({
@@ -967,6 +1119,15 @@ window.__ModuleLoader__.load({
 									svgs: doc.querySelectorAll('svg').length,
 									docTitle: doc.title,
 									titleEl: (doc.querySelector('title') || {}).textContent || null,
+									scrollbar: bodyEl ? bodyEl.offsetWidth - bodyEl.clientWidth : null,
+									scroll:
+										bodyEl && {
+											top: bodyEl.scrollTop,
+											height: bodyEl.scrollHeight,
+											client: bodyEl.clientHeight,
+											docHeight: doc.documentElement.scrollHeight,
+											docClient: doc.documentElement.clientHeight,
+										},
 									tail: (doc.body.innerText || '').replace(/\s+/g, ' ').slice(-220),
 								}),
 						);
@@ -1122,7 +1283,24 @@ window.__ModuleLoader__.load({
 					h('div', { className: 'dsh-pip-title', title }, title),
 					h('div', { className: 'dsh-pip-meta' }, running ? '运行中' : '空闲'),
 				),
-				h('div', { className: 'dsh-pip-body', ref: bodyRef }, body, error ? h('div', { className: 'dsh-pip-error' }, error) : null),
+				h(
+					'div',
+					{ className: 'dsh-pip-main' },
+					h('div', { className: 'dsh-pip-body', ref: bodyRef }, body, error ? h('div', { className: 'dsh-pip-error' }, error) : null),
+					scrollInfo.total > scrollInfo.view + 1
+						? h(
+								'div',
+								{ className: 'dsh-pip-scrollbar', ref: trackRef, onMouseDown: onTrackDown },
+								h('div', {
+									className: 'dsh-pip-scrollbar-thumb',
+									style: { top: thumbTop, height: thumbHeight },
+									role: 'slider',
+									'aria-label': '滚动',
+									onMouseDown: onThumbDown,
+								}),
+							)
+						: null,
+				),
 				h(
 					'div',
 					{ className: 'dsh-pip-footer' },
@@ -1219,6 +1397,28 @@ window.__ModuleLoader__.load({
 						totalTokens != null ? h('span', null, formatTokens(totalTokens) + ' tok') : null,
 						cacheHit !== null ? h('span', null, '缓存命中 ' + cacheHit + '%') : null,
 						occupancy ? h('span', null, '上下文 ' + occupancy.percent + '%') : null,
+						h(
+							'button',
+							{
+								type: 'button',
+								className: 'dsh-pip-nav',
+								title: '跳到顶部（Home）',
+								'aria-label': '跳到顶部',
+								onClick: () => scrollBodyTo('top'),
+							},
+							h(IconChevronUp, { size: 12 }),
+						),
+						h(
+							'button',
+							{
+								type: 'button',
+								className: 'dsh-pip-nav',
+								title: '跳到最新（End）',
+								'aria-label': '跳到最新',
+								onClick: () => scrollBodyTo('bottom'),
+							},
+							h(IconChevronDown, { size: 12 }),
+						),
 					),
 				),
 			);
