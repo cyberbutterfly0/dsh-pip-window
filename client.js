@@ -1428,6 +1428,120 @@ window.__ModuleLoader__.load({
 		 * 窗口开合
 		 * ================================================================== */
 
+		/* ==================================================================
+		 * 剪贴板
+		 * ================================================================== */
+
+		// PiP 是独立文档。primitives 的复制实现是「先试 navigator.clipboard.writeText，
+		// 抛错就 return false」——不回退也不提示。在 PiP 窗口里这个调用会被拒
+		// （窗口不是 active document），于是代码块的复制按钮看起来像摆设。
+		// 这里给 PiP 的 clipboard 打补丁：失败时用 textarea + execCommand 兜，
+		// 再失败把文本转给主窗口写。
+		function copyInDocument(doc, text) {
+			try {
+				const area = doc.createElement('textarea');
+				area.value = text;
+				area.setAttribute('readonly', '');
+				area.style.position = 'fixed';
+				area.style.left = '-9999px';
+				area.style.top = '0';
+				doc.body.appendChild(area);
+				area.select();
+				let ok = false;
+				try {
+					ok = doc.execCommand('copy');
+				} catch {
+					ok = false;
+				}
+				area.remove();
+				return ok;
+			} catch {
+				return false;
+			}
+		}
+
+		function patchPipClipboard(win) {
+			try {
+				const clip = win.navigator && win.navigator.clipboard;
+				if (!clip || typeof clip.writeText !== 'function') return false;
+				const original = clip.writeText.bind(clip);
+				Object.defineProperty(clip, 'writeText', {
+					configurable: true,
+					value: async (text) => {
+						try {
+							await original(text);
+							return true;
+						} catch {
+							/* 走兜底 */
+						}
+						if (copyInDocument(win.document, text)) return true;
+						try {
+							const opener = win.opener;
+							if (opener && !opener.closed && opener.navigator && opener.navigator.clipboard) {
+								await opener.navigator.clipboard.writeText(text);
+								return true;
+							}
+						} catch {
+							/* 最后一条路也失败 */
+						}
+						return false;
+					},
+				});
+				return true;
+			} catch {
+				return false;
+			}
+		}
+
+		// 客户端 bundle 跑在主文档上下文（React 只是把 DOM 渲染进 PiP），
+		// 所以 primitives 的复制调用用的是**主文档**的 navigator.clipboard；
+		// 用户点 PiP 时主文档失焦，writeText 会被拒，复制按钮就静默失败了。
+		// 这里 patch 主文档的 clipboard，失败时依次改走 PiP 的 clipboard 与 execCommand。
+		function patchMainClipboard(pipWin) {
+			try {
+				const mainClip = window.navigator && window.navigator.clipboard;
+				if (!mainClip || typeof mainClip.writeText !== 'function') return false;
+				if (mainClip.__dshPipPatched) return true;
+				const original = mainClip.writeText.bind(mainClip);
+				Object.defineProperty(mainClip, 'writeText', {
+					configurable: true,
+					value: async (text) => {
+						try {
+							await original(text);
+							if (DEBUG) log('clipboard: main document write ok');
+							return true;
+						} catch (err) {
+							if (DEBUG) log('clipboard: main document write rejected ' + JSON.stringify(String(err)));
+						}
+						try {
+							const win = pipWin;
+							if (win && !win.closed && win.navigator && win.navigator.clipboard) {
+								await win.navigator.clipboard.writeText(text);
+								return true;
+							}
+						} catch {
+							/* 继续 */
+						}
+						try {
+							const win = pipWin;
+							if (win && !win.closed && copyInDocument(win.document, text)) return true;
+						} catch {
+							/* 继续 */
+						}
+						return copyInDocument(document, text);
+					},
+				});
+				try {
+					mainClip.__dshPipPatched = true;
+				} catch {
+					/* 忽略 */
+				}
+				return true;
+			} catch {
+				return false;
+			}
+		}
+
 		let pipWindow = null;
 		let pipRoot = null;
 
@@ -1459,6 +1573,14 @@ window.__ModuleLoader__.load({
 				// 标题栏默认显示主文档 URL（127.0.0.1:3080 之类），换成产品名。
 				// 放在搬运之后：head 一定就绪了才设得住。
 				applyPipTitle(pipWindow.document, 'DeepSeek Harness');
+
+				// 复制按钮：bundle 内的 writeClipboard 用主文档 navigator，
+				// 点 PiP 时主文档失焦会被拒，这里两边都打上补丁。
+				const clipboardPatch = {
+					main: patchMainClipboard(pipWindow),
+					pip: patchPipClipboard(pipWindow),
+				};
+				log('pip clipboard patch ' + JSON.stringify(clipboardPatch));
 
 				const container = pipWindow.document.createElement('div');
 				container.id = 'dsh-pip-root';
